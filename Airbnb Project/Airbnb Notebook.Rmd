@@ -1,0 +1,90 @@
+---
+title: "Airbnb Price Data Project"
+output: html_notebook
+---
+
+
+
+```{r setup, include=FALSE}
+library(tidymodels)
+library(lubridate)
+library(stringr)
+```
+
+
+```{r, echo=FALSE}
+file_path <- "C:/Users/oskar/OneDrive/Documents/School/ST310 Machine Learning/Airbnb Project/"
+```
+
+
+```{r}
+airbnbs <- read.csv(paste0(file_path, "Airbnb_Data.csv"))
+
+#Getting rid of irrelevant variables
+airbnbs$id <- NULL 
+airbnbs$amenities <- NULL 
+airbnbs$description <- NULL 
+airbnbs$first_review <- NULL
+airbnbs$last_review <- NULL
+airbnbs$longitude <- NULL
+airbnbs$latitude <- NULL
+airbnbs$name <- NULL
+airbnbs$thumbnail_url <- NULL
+
+
+#Splitting data into training and testing
+airbnbs_split <- initial_split(airbnbs) 
+airbnbs_split
+```
+
+
+```{r}
+#Set up recipe for training data
+airbnb_recipe <- training(airbnbs_split) %>%
+  recipe(log_price ~ .) %>%
+  
+  #Remove categorical variables with too many levels
+  step_rm(neighbourhood) %>%
+  step_rm(zipcode) %>%
+  
+  #Filter out data that doesn't fit into these 3 categories for cancellation_policy
+  step_filter(cancellation_policy == "strict" | 
+                cancellation_policy == "moderate" |
+                cancellation_policy == "flexible") %>%
+  
+  #Mutate host_since into something usable by models (days active)
+  step_mutate(days_active = as.integer(difftime(today(), ymd(host_since), units = "days"))) %>%
+  step_rm(host_since) %>%
+  
+  #Fill in missing values for binary variables with their mode
+  step_impute_mode(host_has_profile_pic, host_identity_verified) %>%
+  
+  #Create dummy variables for categorical variables
+  step_dummy(property_type, room_type, bed_type, cancellation_policy, city) %>%
+  
+  #Mutate these binary variables into their correct form
+  step_mutate(cleaning_fee = ifelse(cleaning_fee == "True", 1, 0)) %>%
+  step_mutate(host_has_profile_pic = ifelse(host_has_profile_pic == "t", 1, 0)) %>%
+  step_mutate(host_identity_verified = ifelse(host_identity_verified == "t", 1, 0)) %>%
+  step_mutate(instant_bookable = ifelse(instant_bookable == "t", 1, 0)) %>%
+  
+  #Format host_response_rate as a numeric instead of a percentage
+  step_mutate(host_response_rate = as.numeric(str_remove(host_response_rate, "%"))) %>%
+  
+  #Fill in the rest of the missing values (using median for those with skewed distributions)
+  step_impute_mean(days_active) %>%
+  step_impute_median(bathrooms, host_response_rate, review_scores_rating, bedrooms, beds) %>%
+  
+  #Remove variables which are highly correlated
+  step_corr(all_numeric_predictors(), threshold = 0.8) %>%
+  prep()
+
+#Apply recipe to training and testing data and put in a dataframe
+airbnbs_train <- juice(airbnb_recipe)
+airbnbs_test <- airbnb_recipe %>%
+  bake(testing(airbnbs_split))
+
+head(airbnbs_train)
+
+```
+
